@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.env/
+
+# Data & outputs
+data/
+results/
+pp/
+*.csv
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Backups
+Walmart_Project_backup/
+
+# OS
+.DS_Store
+
