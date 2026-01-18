@@ -1,0 +1,25 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# ---- Virtual Environments ----
+venv/
+.env/
+
+# ---- Data (DO NOT TRACK DATASETS) ----
+data/
+*.csv
+
+# ---- Results & Outputs ----
+results/
+pp/
+
+# ---- Backups ----
+Walmart_Project_backup/
+
+# ---- OS ----
+.DS_Store
+
+

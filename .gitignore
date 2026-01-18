@@ -8,9 +8,7 @@ __pycache__/
 venv/
 .env/
 
-# ---- Data (DO NOT TRACK DATASETS) ----
-data/
-*.csv
+
 
 # ---- Results & Outputs ----
 results/
