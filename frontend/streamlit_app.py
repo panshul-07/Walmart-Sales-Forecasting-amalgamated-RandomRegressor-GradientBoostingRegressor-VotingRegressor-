@@ -4,36 +4,33 @@ import numpy as np
 import matplotlib.pyplot as plt
 import io
 
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(
     page_title="Walmart Demand Forecasting",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ---------- GLOBAL STYLES ----------
+# ---------------- STYLES ----------------
 st.markdown(
     """
     <style>
         .kpi-card {
-            background-color: #111;
+            background-color: rgba(0,0,0,0.03);
             padding: 20px;
             border-radius: 14px;
-            border: 1px solid #222;
+            border: 1px solid rgba(0,0,0,0.1);
         }
         .kpi-title {
-            font-size: 13px;
-            color: #9ca3af;
+            font-size: 14px;
+            color: gray;
         }
         .kpi-value {
             font-size: 32px;
             font-weight: 600;
-            color: white;
         }
         .section {
             margin-top: 40px;
-        }
-        .stPyplot {
-            transition: all 0.3s ease-in-out;
         }
     </style>
     """,
@@ -42,12 +39,13 @@ st.markdown(
 
 st.title("Walmart Demand Forecasting")
 
-# ---------- DATA LOADING ----------
+# ---------------- DATA ----------------
 @st.cache_data
 def load_data():
     if "csv_data" not in st.secrets:
-        st.error("csv_data missing in Streamlit Secrets")
+        st.error("❌ csv_data missing in Streamlit Secrets")
         st.stop()
+
     df = pd.read_csv(io.StringIO(st.secrets["csv_data"]))
     df.columns = df.columns.str.strip()
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True)
@@ -55,7 +53,7 @@ def load_data():
 
 df = load_data()
 
-# ---------- SIDEBAR ----------
+# ---------------- SIDEBAR ----------------
 st.sidebar.header("Input Parameters")
 
 store_id = st.sidebar.number_input(
@@ -71,7 +69,7 @@ fuel_price = st.sidebar.slider("Fuel Price ($/gal)", 2.0, 5.0, 3.5)
 cpi = st.sidebar.slider("CPI", 200.0, 300.0, 220.0)
 unemployment = st.sidebar.slider("Unemployment Rate (%)", 3.0, 15.0, 7.0)
 
-# ---------- MODEL ----------
+# ---------------- MODEL ----------------
 store_df = df[df["Store"] == store_id].sort_values("Date")
 avg_sales = store_df["Weekly_Sales"].mean()
 
@@ -97,8 +95,9 @@ def base_prediction():
 
 predicted_sales = base_prediction() + temp_effect(temperature)
 
-# ---------- KPI CARDS ----------
+# ---------------- KPI SECTION ----------------
 st.markdown('<div class="section"></div>', unsafe_allow_html=True)
+
 k1, k2, k3 = st.columns(3)
 
 with k1:
@@ -123,106 +122,92 @@ with k3:
         unsafe_allow_html=True
     )
 
-# ---------- RECENT TREND ----------
+# ---------------- TREND ----------------
 st.markdown('<div class="section"></div>', unsafe_allow_html=True)
 st.subheader("Recent Sales Trend")
 
 recent = store_df.tail(20)
 
 fig, ax = plt.subplots(figsize=(12, 4))
-ax.plot(recent["Date"], recent["Weekly_Sales"], color="#4da6ff", linewidth=2.5, marker="o")
-ax.fill_between(recent["Date"], recent["Weekly_Sales"], color="#4da6ff", alpha=0.08)
-ax.axhline(predicted_sales, linestyle="--", color="#ff4d4d", label="Prediction")
-
-ax.legend()
-ax.grid(alpha=0.2)
-ax.set_facecolor("#0e1117")
-fig.patch.set_facecolor("#0e1117")
+ax.plot(recent["Date"], recent["Weekly_Sales"], marker="o", linewidth=2)
+ax.axhline(predicted_sales, linestyle="--", linewidth=1.5, label="Prediction")
+ax.legend(frameon=False)
+ax.grid(alpha=0.3, linestyle="--")
 ax.yaxis.set_major_formatter('${x:,.0f}')
-
 st.pyplot(fig, use_container_width=True)
 
-# ---------- SENSITIVITY ----------
+# ---------------- SENSITIVITY ----------------
 st.markdown('<div class="section"></div>', unsafe_allow_html=True)
 st.subheader("Sensitivity Analysis")
+st.caption("Sales response around the current operating point")
 
-st.markdown(
-    f"<div style='color:#9ca3af; margin-bottom:12px;'>"
-    f"Sales response around current operating point (${predicted_sales:,.0f})"
-    f"</div>",
-    unsafe_allow_html=True
-)
-
-def plot_sensitivity(x, y, current_x, title, xlabel):
+def plot_sensitivity(x, y, current_x, current_y, title, xlabel):
     fig, ax = plt.subplots(figsize=(6, 4))
 
-    ax.plot(x, y, color="#00e5ff", linewidth=2.5)
+    ax.plot(x, y, linewidth=2.5)
+    ax.scatter(current_x, current_y, s=90, zorder=5)
+    ax.axvline(current_x, linestyle="--", linewidth=1.2, alpha=0.7)
 
-    for a in np.linspace(0.02, 0.12, 6):
-        ax.fill_between(x, y, color="#00e5ff", alpha=a)
-
-    current_y = np.interp(current_x, x, y)
-    ax.scatter(current_x, current_y, s=120, color="#ff4d4d",
-               edgecolors="white", linewidths=1.5, zorder=5)
-
-    ax.annotate(
-        f"${current_y:,.0f}",
-        (current_x, current_y),
-        xytext=(8, 8),
-        textcoords="offset points",
-        fontsize=10,
-        color="white",
-        weight="bold"
-    )
-
-    ax.axvline(current_x, color="#ff4d4d", linestyle="--", alpha=0.8)
-    ax.set_title(title)
+    ax.set_title(title, fontsize=13, weight="semibold")
     ax.set_xlabel(xlabel)
-    ax.grid(alpha=0.2)
+    ax.set_ylabel("Weekly Sales")
 
-    ax.set_facecolor("#0e1117")
-    fig.patch.set_facecolor("#0e1117")
+    ax.grid(True, alpha=0.25, linestyle="--")
     ax.yaxis.set_major_formatter('${x:,.0f}')
 
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#333')
-    ax.spines['bottom'].set_color('#333')
+    for spine in ax.spines.values():
+        spine.set_alpha(0.3)
 
     return fig
 
 c1, c2 = st.columns(2)
 
 # Temperature
-t = np.linspace(20, 120, 100)
+t_range = np.linspace(20, 120, 100)
+t_sales = base_prediction() + temp_effect(t_range)
 with c1:
-    st.pyplot(plot_sensitivity(
-        t, base_prediction() + temp_effect(t),
-        temperature, "Temperature Sensitivity", "Temperature (°F)"
-    ))
+    st.pyplot(
+        plot_sensitivity(
+            t_range, t_sales, temperature, predicted_sales,
+            "Temperature Sensitivity", "Temperature (°F)"
+        ),
+        use_container_width=True
+    )
 
 # Fuel
-f = np.linspace(2, 5, 100)
+f_range = np.linspace(2, 5, 100)
+f_sales = predicted_sales + COEF_FUEL * (f_range - fuel_price)
 with c2:
-    st.pyplot(plot_sensitivity(
-        f, predicted_sales + COEF_FUEL * (f - fuel_price),
-        fuel_price, "Fuel Price Sensitivity", "Fuel ($/gal)"
-    ))
+    st.pyplot(
+        plot_sensitivity(
+            f_range, f_sales, fuel_price, predicted_sales,
+            "Fuel Price Sensitivity", "Fuel ($/gal)"
+        ),
+        use_container_width=True
+    )
 
 # CPI
-c = np.linspace(200, 300, 100)
+c_range = np.linspace(200, 300, 100)
+c_sales = predicted_sales + COEF_CPI * (c_range - cpi)
 with c1:
-    st.pyplot(plot_sensitivity(
-        c, predicted_sales + COEF_CPI * (c - cpi),
-        cpi, "CPI Sensitivity", "CPI"
-    ))
+    st.pyplot(
+        plot_sensitivity(
+            c_range, c_sales, cpi, predicted_sales,
+            "CPI Sensitivity", "CPI"
+        ),
+        use_container_width=True
+    )
 
 # Unemployment
-u = np.linspace(3, 15, 100)
+u_range = np.linspace(3, 15, 100)
+u_sales = predicted_sales + COEF_UNEMP * (u_range - unemployment)
 with c2:
-    st.pyplot(plot_sensitivity(
-        u, predicted_sales + COEF_UNEMP * (u - unemployment),
-        unemployment, "Unemployment Sensitivity", "Unemployment (%)"
-    ))
+    st.pyplot(
+        plot_sensitivity(
+            u_range, u_sales, unemployment, predicted_sales,
+            "Unemployment Sensitivity", "Unemployment (%)"
+        ),
+        use_container_width=True
+    )
 
 st.caption("Walmart Demand Forecasting")
