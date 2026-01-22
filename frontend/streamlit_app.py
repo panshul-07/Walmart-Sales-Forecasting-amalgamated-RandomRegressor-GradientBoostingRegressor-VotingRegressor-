@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 import io
-import os
 
 st.set_page_config(
     page_title="Walmart Demand Forecasting",
@@ -11,27 +10,30 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ---------- GLOBAL STYLES ----------
 st.markdown(
     """
     <style>
         .kpi-card {
-            background: linear-gradient(145deg, #0f0f0f, #161616);
-            padding: 22px;
+            background-color: #111;
+            padding: 20px;
             border-radius: 14px;
             border: 1px solid #222;
-            box-shadow: 0 0 25px rgba(0,0,0,0.4);
         }
         .kpi-title {
-            font-size: 14px;
-            color: #aaa;
+            font-size: 13px;
+            color: #9ca3af;
         }
         .kpi-value {
             font-size: 32px;
             font-weight: 600;
-            margin-top: 6px;
+            color: white;
         }
         .section {
-            margin-top: 50px;
+            margin-top: 40px;
+        }
+        .stPyplot {
+            transition: all 0.3s ease-in-out;
         }
     </style>
     """,
@@ -40,21 +42,20 @@ st.markdown(
 
 st.title("Walmart Demand Forecasting")
 
-# ---------------- DATA LOADING ----------------
+# ---------- DATA LOADING ----------
 @st.cache_data
 def load_data():
-    if "csv_data" in st.secrets:
-        df = pd.read_csv(io.StringIO(st.secrets["csv_data"]))
-    else:
-        df = pd.read_csv("data/raw/store_history.csv")
-
+    if "csv_data" not in st.secrets:
+        st.error("csv_data missing in Streamlit Secrets")
+        st.stop()
+    df = pd.read_csv(io.StringIO(st.secrets["csv_data"]))
     df.columns = df.columns.str.strip()
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True)
     return df
 
 df = load_data()
 
-# ---------------- SIDEBAR ----------------
+# ---------- SIDEBAR ----------
 st.sidebar.header("Input Parameters")
 
 store_id = st.sidebar.number_input(
@@ -65,13 +66,12 @@ store_id = st.sidebar.number_input(
 )
 
 holiday_flag = st.sidebar.toggle("Holiday Week")
-
 temperature = st.sidebar.slider("Temperature (°F)", 20.0, 120.0, 70.0)
 fuel_price = st.sidebar.slider("Fuel Price ($/gal)", 2.0, 5.0, 3.5)
 cpi = st.sidebar.slider("CPI", 200.0, 300.0, 220.0)
 unemployment = st.sidebar.slider("Unemployment Rate (%)", 3.0, 15.0, 7.0)
 
-# ---------------- MODEL (COEFF-BASED) ----------------
+# ---------- MODEL ----------
 store_df = df[df["Store"] == store_id].sort_values("Date")
 avg_sales = store_df["Weekly_Sales"].mean()
 
@@ -83,161 +83,146 @@ COEF_UNEMP = -418.9919
 TEMP_OPTIMAL = 70.0
 TEMP_CURVATURE = -196.8391
 
-def temperature_effect(t):
+def temp_effect(t):
     return TEMP_CURVATURE * (t - TEMP_OPTIMAL) ** 2
 
-def predict_sales(temp, fuel, cpi_val, unemp):
+def base_prediction():
     return (
         CONST
         + COEF_HOLIDAY * int(holiday_flag)
-        + temperature_effect(temp)
-        + COEF_FUEL * fuel
-        + COEF_CPI * cpi_val
-        + COEF_UNEMP * unemp
+        + COEF_FUEL * fuel_price
+        + COEF_CPI * cpi
+        + COEF_UNEMP * unemployment
     )
 
-predicted_sales = predict_sales(temperature, fuel_price, cpi, unemployment)
+predicted_sales = base_prediction() + temp_effect(temperature)
 
-# ---------------- KPI CARDS ----------------
+# ---------- KPI CARDS ----------
 st.markdown('<div class="section"></div>', unsafe_allow_html=True)
-
 k1, k2, k3 = st.columns(3)
 
 with k1:
     st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Predicted Weekly Sales</div>
-            <div class="kpi-value">${predicted_sales:,.0f}</div>
-        </div>
-        """,
+        f"<div class='kpi-card'><div class='kpi-title'>Predicted Weekly Sales</div>"
+        f"<div class='kpi-value'>${predicted_sales:,.0f}</div></div>",
         unsafe_allow_html=True
     )
 
 with k2:
     st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Average Store Sales</div>
-            <div class="kpi-value">${avg_sales:,.0f}</div>
-        </div>
-        """,
+        f"<div class='kpi-card'><div class='kpi-title'>Average Store Sales</div>"
+        f"<div class='kpi-value'>${avg_sales:,.0f}</div></div>",
         unsafe_allow_html=True
     )
 
 with k3:
     delta = ((predicted_sales - avg_sales) / avg_sales) * 100
     st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Change vs Average</div>
-            <div class="kpi-value">{delta:.2f}%</div>
-        </div>
-        """,
+        f"<div class='kpi-card'><div class='kpi-title'>Change vs Average</div>"
+        f"<div class='kpi-value'>{delta:.2f}%</div></div>",
         unsafe_allow_html=True
     )
 
-# ---------------- RECENT TREND (PLOTLY) ----------------
+# ---------- RECENT TREND ----------
 st.markdown('<div class="section"></div>', unsafe_allow_html=True)
 st.subheader("Recent Sales Trend")
 
 recent = store_df.tail(20)
 
-fig_trend = go.Figure()
+fig, ax = plt.subplots(figsize=(12, 4))
+ax.plot(recent["Date"], recent["Weekly_Sales"], color="#4da6ff", linewidth=2.5, marker="o")
+ax.fill_between(recent["Date"], recent["Weekly_Sales"], color="#4da6ff", alpha=0.08)
+ax.axhline(predicted_sales, linestyle="--", color="#ff4d4d", label="Prediction")
 
-fig_trend.add_trace(go.Scatter(
-    x=recent["Date"],
-    y=recent["Weekly_Sales"],
-    mode="lines+markers",
-    name="Actual",
-    line=dict(width=3)
-))
+ax.legend()
+ax.grid(alpha=0.2)
+ax.set_facecolor("#0e1117")
+fig.patch.set_facecolor("#0e1117")
+ax.yaxis.set_major_formatter('${x:,.0f}')
 
-fig_trend.add_hline(
-    y=predicted_sales,
-    line_dash="dash",
-    line_color="red",
-    annotation_text="Prediction",
-    annotation_position="top right"
-)
+st.pyplot(fig, use_container_width=True)
 
-fig_trend.update_layout(
-    template="plotly_dark",
-    height=420,
-    yaxis_tickprefix="$",
-    yaxis_tickformat=",.0f"
-)
-
-st.plotly_chart(fig_trend, use_container_width=True)
-
-# ---------------- SENSITIVITY ANALYSIS ----------------
+# ---------- SENSITIVITY ----------
 st.markdown('<div class="section"></div>', unsafe_allow_html=True)
 st.subheader("Sensitivity Analysis")
 
-def sensitivity_plot(x, y, xlabel, vline):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=x, y=y, fill="tozeroy", line=dict(width=3)))
-    fig.add_vline(x=vline, line_dash="dash", line_color="red")
-    fig.update_layout(
-        template="plotly_dark",
-        height=350,
-        xaxis_title=xlabel,
-        yaxis_tickprefix="$",
-        yaxis_tickformat=",.0f"
+st.markdown(
+    f"<div style='color:#9ca3af; margin-bottom:12px;'>"
+    f"Sales response around current operating point (${predicted_sales:,.0f})"
+    f"</div>",
+    unsafe_allow_html=True
+)
+
+def plot_sensitivity(x, y, current_x, title, xlabel):
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    ax.plot(x, y, color="#00e5ff", linewidth=2.5)
+
+    for a in np.linspace(0.02, 0.12, 6):
+        ax.fill_between(x, y, color="#00e5ff", alpha=a)
+
+    current_y = np.interp(current_x, x, y)
+    ax.scatter(current_x, current_y, s=120, color="#ff4d4d",
+               edgecolors="white", linewidths=1.5, zorder=5)
+
+    ax.annotate(
+        f"${current_y:,.0f}",
+        (current_x, current_y),
+        xytext=(8, 8),
+        textcoords="offset points",
+        fontsize=10,
+        color="white",
+        weight="bold"
     )
+
+    ax.axvline(current_x, color="#ff4d4d", linestyle="--", alpha=0.8)
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.grid(alpha=0.2)
+
+    ax.set_facecolor("#0e1117")
+    fig.patch.set_facecolor("#0e1117")
+    ax.yaxis.set_major_formatter('${x:,.0f}')
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#333')
+    ax.spines['bottom'].set_color('#333')
+
     return fig
 
-t_range = np.linspace(20, 120, 100)
-f_range = np.linspace(2, 5, 80)
-c_range = np.linspace(200, 300, 80)
-u_range = np.linspace(3, 15, 80)
+c1, c2 = st.columns(2)
 
-col1, col2 = st.columns(2)
+# Temperature
+t = np.linspace(20, 120, 100)
+with c1:
+    st.pyplot(plot_sensitivity(
+        t, base_prediction() + temp_effect(t),
+        temperature, "Temperature Sensitivity", "Temperature (°F)"
+    ))
 
-with col1:
-    st.plotly_chart(
-        sensitivity_plot(
-            t_range,
-            [predict_sales(t, fuel_price, cpi, unemployment) for t in t_range],
-            "Temperature (°F)",
-            temperature
-        ),
-        use_container_width=True
-    )
+# Fuel
+f = np.linspace(2, 5, 100)
+with c2:
+    st.pyplot(plot_sensitivity(
+        f, predicted_sales + COEF_FUEL * (f - fuel_price),
+        fuel_price, "Fuel Price Sensitivity", "Fuel ($/gal)"
+    ))
 
-with col2:
-    st.plotly_chart(
-        sensitivity_plot(
-            f_range,
-            [predict_sales(temperature, f, cpi, unemployment) for f in f_range],
-            "Fuel Price ($/gal)",
-            fuel_price
-        ),
-        use_container_width=True
-    )
+# CPI
+c = np.linspace(200, 300, 100)
+with c1:
+    st.pyplot(plot_sensitivity(
+        c, predicted_sales + COEF_CPI * (c - cpi),
+        cpi, "CPI Sensitivity", "CPI"
+    ))
 
-col3, col4 = st.columns(2)
-
-with col3:
-    st.plotly_chart(
-        sensitivity_plot(
-            c_range,
-            [predict_sales(temperature, fuel_price, c, unemployment) for c in c_range],
-            "CPI",
-            cpi
-        ),
-        use_container_width=True
-    )
-
-with col4:
-    st.plotly_chart(
-        sensitivity_plot(
-            u_range,
-            [predict_sales(temperature, fuel_price, cpi, u) for u in u_range],
-            "Unemployment Rate (%)",
-            unemployment
-        ),
-        use_container_width=True
-    )
+# Unemployment
+u = np.linspace(3, 15, 100)
+with c2:
+    st.pyplot(plot_sensitivity(
+        u, predicted_sales + COEF_UNEMP * (u - unemployment),
+        unemployment, "Unemployment Sensitivity", "Unemployment (%)"
+    ))
 
 st.caption("Walmart Demand Forecasting")
