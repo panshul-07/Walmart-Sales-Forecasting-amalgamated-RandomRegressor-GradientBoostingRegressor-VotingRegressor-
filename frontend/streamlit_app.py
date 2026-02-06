@@ -8,7 +8,34 @@ import os
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
     page_title="Walmart Demand Forecasting",
+<<<<<<< HEAD
     layout="wide"  # Changed to wide to fit the 4-graph grid comfortably
+=======
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
+
+# ---------------- STYLES ----------------
+st.markdown(
+    """
+    <style>
+        .kpi-card {
+            background-color: rgba(0,0,0,0.03);
+            padding: 10px;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+        .kpi-title {
+            font-size: 14px;
+            color: gray;
+        }
+        .kpi-value {
+            font-size: 32px;
+            font-weight: 600;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+>>>>>>> 50e8e3ff0f99f933d0185c04e0c1ab3f30ca11d6
 )
 
 st.title("Walmart Demand Forecasting")
@@ -84,6 +111,38 @@ with m_col2:
     st.write(f"**Avg Sales:** ${base_sales:,.2f}")
     st.write(f"**Records:** {len(store_df)}")
 
+<<<<<<< HEAD
+=======
+# ---------------- KPI SECTION ----------------
+st.markdown('<div class="section"></div>', unsafe_allow_html=True)
+
+k1, k2, k3 = st.columns(3)
+
+with k1:
+    st.markdown(
+        f"<div class='kpi-title'>Predicted Weekly Sales</div>"
+        f"<div class='kpi-value'>${predicted_sales:,.0f}</div>",
+        unsafe_allow_html=True
+    )
+
+with k2:
+    st.markdown(
+        f"<div class='kpi-title'>Average Store Sales</div>"
+        f"<div class='kpi-value'>${avg_sales:,.0f}</div>",
+        unsafe_allow_html=True
+    )
+
+with k3:
+    delta = ((predicted_sales - avg_sales) / avg_sales) * 100
+    st.markdown(
+        f"<div class='kpi-title'>Change vs Average</div>"
+        f"<div class='kpi-value'>{delta:.2f}%</div>",
+        unsafe_allow_html=True
+    )
+
+# ---------------- TREND ----------------
+st.markdown('<div class="section"></div>', unsafe_allow_html=True)
+>>>>>>> 50e8e3ff0f99f933d0185c04e0c1ab3f30ca11d6
 st.subheader("Recent Sales Trend")
 recent = store_df.tail(20)
 fig_trend, ax_trend = plt.subplots(figsize=(12, 4))
