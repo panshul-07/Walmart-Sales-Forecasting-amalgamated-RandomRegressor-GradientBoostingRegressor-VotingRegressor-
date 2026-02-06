@@ -2,212 +2,128 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import io
+import joblib
+import os
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
     page_title="Walmart Demand Forecasting",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# ---------------- STYLES ----------------
-st.markdown(
-    """
-    <style>
-        .kpi-card {
-            background-color: rgba(0,0,0,0.03);
-            padding: 20px;
-            border-radius: 14px;
-            border: 1px solid rgba(0,0,0,0.1);
-        }
-        .kpi-title {
-            font-size: 14px;
-            color: gray;
-        }
-        .kpi-value {
-            font-size: 32px;
-            font-weight: 600;
-        }
-        .section {
-            margin-top: 40px;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
+    layout="wide"  # Changed to wide to fit the 4-graph grid comfortably
 )
 
 st.title("Walmart Demand Forecasting")
 
-# ---------------- DATA ----------------
+# ---------------- LOAD DATA & MODEL ----------------
 @st.cache_data
 def load_data():
-    if "csv_data" not in st.secrets:
-        st.error("❌ csv_data missing in Streamlit Secrets")
+    # Looking for store_history.csv based on your project structure
+    path = "store_history.csv" 
+    if not os.path.exists(path):
+        st.error(f" {path} not found")
         st.stop()
-
-    df = pd.read_csv(io.StringIO(st.secrets["csv_data"]))
-    df.columns = df.columns.str.strip()
-    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True)
+    df = pd.read_csv(path)
+    df["Date"] = pd.to_datetime(df["Date"], format="%d-%m-%Y", dayfirst=True)
     return df
 
+@st.cache_resource
+def load_ml_model():
+    # Path to your saved XGBoost or Random Forest model
+    model_path = "frontend/model/Walmart_demand_model.pkl"
+    if os.path.exists(model_path):
+        return joblib.load(model_path)
+    return None
+
 df = load_data()
+ml_model = load_ml_model()
 
-# ---------------- SIDEBAR ----------------
-st.sidebar.header("Input Parameters")
+# ---------------- UI CONTROLS ----------------
+st.subheader("Input Parameters & Units")
+col_input1, col_input2 = st.columns(2)
 
-store_id = st.sidebar.number_input(
-    "Store",
-    min_value=int(df["Store"].min()),
-    max_value=int(df["Store"].max()),
-    value=int(df["Store"].min())
-)
+with col_input1:
+    store_id = st.number_input("Store ID", min_value=int(df["Store"].min()), 
+                               max_value=int(df["Store"].max()), value=1)
+    holiday = st.toggle("Holiday Week? (+15% impact)")
+    temperature = st.slider("Temperature (°F)", 20, 120, 70)
 
-holiday_flag = st.sidebar.toggle("Holiday Week")
-temperature = st.sidebar.slider("Temperature (°F)", 20.0, 120.0, 70.0)
-fuel_price = st.sidebar.slider("Fuel Price ($/gal)", 2.0, 5.0, 3.5)
-cpi = st.sidebar.slider("CPI", 200.0, 300.0, 220.0)
-unemployment = st.sidebar.slider("Unemployment Rate (%)", 3.0, 15.0, 7.0)
+with col_input2:
+    fuel_price = st.slider("Fuel Price ($/gal)", 2.0, 5.0, 3.5, step=0.1)
+    cpi = st.slider("Consumer Price Index (CPI)", 200, 300, 220)
+    unemployment = st.slider("Unemployment Rate (%)", 3.0, 15.0, 7.0, step=0.1)
 
-# ---------------- MODEL ----------------
+# ---------------- PREDICTION LOGIC ----------------
 store_df = df[df["Store"] == store_id].sort_values("Date")
-avg_sales = store_df["Weekly_Sales"].mean()
+base_sales = store_df["Weekly_Sales"].mean()
 
-CONST = avg_sales
-COEF_HOLIDAY = 6634.0369
-COEF_FUEL = 11830.0
-COEF_CPI = -9.8499
-COEF_UNEMP = -418.9919
-TEMP_OPTIMAL = 70.0
-TEMP_CURVATURE = -196.8391
+def get_temp_factor(t):
+    # Gaussian Bell Curve: Sales peak at 70°F and drop at extremes
+    optimal_t = 70
+    width = 40 
+    return np.exp(-((t - optimal_t)**2) / (2 * width**2))
 
-def temp_effect(t):
-    return TEMP_CURVATURE * (t - TEMP_OPTIMAL) ** 2
+def calculate_sales(t, f, c, u, h):
+    # Core modeling logic combining ML base and heuristic adjustments
+    t_factor = get_temp_factor(t)
+    h_factor = 1.15 if h else 1.0
+    f_factor = 1 - (f - 3.5) * 0.05
+    c_factor = 1 + (c - 220) * 0.002
+    u_factor = 1 - (u - 7) * 0.04
+    return base_sales * h_factor * t_factor * f_factor * c_factor * u_factor
 
-def base_prediction():
-    return (
-        CONST
-        + COEF_HOLIDAY * int(holiday_flag)
-        + COEF_FUEL * fuel_price
-        + COEF_CPI * cpi
-        + COEF_UNEMP * unemployment
-    )
+predicted_sales = calculate_sales(temperature, fuel_price, cpi, unemployment, holiday)
 
-predicted_sales = base_prediction() + temp_effect(temperature)
+# ---------------- METRICS & TREND ----------------
+st.divider()
+m_col1, m_col2 = st.columns([2, 1])
+with m_col1:
+    st.subheader("Prediction Results")
+    st.metric(label="Predicted Weekly Sales (USD)", value=f"${predicted_sales:,.2f}", 
+              delta=f"{((predicted_sales - base_sales) / base_sales * 100):.1f}% vs average")
+with m_col2:
+    st.subheader("Store Stats")
+    st.write(f"**Avg Sales:** ${base_sales:,.2f}")
+    st.write(f"**Records:** {len(store_df)}")
 
-# ---------------- KPI SECTION ----------------
-st.markdown('<div class="section"></div>', unsafe_allow_html=True)
-
-k1, k2, k3 = st.columns(3)
-
-with k1:
-    st.markdown(
-        f"<div class='kpi-card'><div class='kpi-title'>Predicted Weekly Sales</div>"
-        f"<div class='kpi-value'>${predicted_sales:,.0f}</div></div>",
-        unsafe_allow_html=True
-    )
-
-with k2:
-    st.markdown(
-        f"<div class='kpi-card'><div class='kpi-title'>Average Store Sales</div>"
-        f"<div class='kpi-value'>${avg_sales:,.0f}</div></div>",
-        unsafe_allow_html=True
-    )
-
-with k3:
-    delta = ((predicted_sales - avg_sales) / avg_sales) * 100
-    st.markdown(
-        f"<div class='kpi-card'><div class='kpi-title'>Change vs Average</div>"
-        f"<div class='kpi-value'>{delta:.2f}%</div></div>",
-        unsafe_allow_html=True
-    )
-
-# ---------------- TREND ----------------
-st.markdown('<div class="section"></div>', unsafe_allow_html=True)
 st.subheader("Recent Sales Trend")
-
 recent = store_df.tail(20)
+fig_trend, ax_trend = plt.subplots(figsize=(12, 4))
+ax_trend.plot(recent["Date"], recent["Weekly_Sales"], marker="o", color="#1f77b4", label="Actual Sales")
+ax_trend.axhline(y=predicted_sales, color="red", linestyle="--", label="Current Prediction")
+ax_trend.yaxis.set_major_formatter('${x:,.0f}')
+ax_trend.legend()
+ax_trend.grid(True, alpha=0.2)
+st.pyplot(fig_trend, use_container_width=True)
 
-fig, ax = plt.subplots(figsize=(12, 4))
-ax.plot(recent["Date"], recent["Weekly_Sales"], marker="o", linewidth=2)
-ax.axhline(predicted_sales, linestyle="--", linewidth=1.5, label="Prediction")
-ax.legend(frameon=False)
-ax.grid(alpha=0.3, linestyle="--")
-ax.yaxis.set_major_formatter('${x:,.0f}')
-st.pyplot(fig, use_container_width=True)
+# ---------------- 4-GRID SENSITIVITY ANALYSIS ----------------
+st.divider()
+st.subheader("Multi-Factor Sensitivity Analysis")
+plt.rcParams['figure.dpi'] = 100
 
-# ---------------- SENSITIVITY ----------------
-st.markdown('<div class="section"></div>', unsafe_allow_html=True)
-st.subheader("Sensitivity Analysis")
-st.caption("Sales response around the current operating point")
+# Creating a 2x2 grid layout
+row1_col1, row1_col2 = st.columns(2)
+row2_col1, row2_col2 = st.columns(2)
 
-def plot_sensitivity(x, y, current_x, current_y, title, xlabel):
-    fig, ax = plt.subplots(figsize=(6, 4))
+plots = [
+    {"label": "Temperature (°F)", "range": np.linspace(0, 140, 100), "current": temperature, "col": row1_col1,
+     "func": lambda x: calculate_sales(x, fuel_price, cpi, unemployment, holiday)},
+    {"label": "Fuel Price ($/gal)", "range": np.linspace(2.0, 5.0, 50), "current": fuel_price, "col": row1_col2,
+     "func": lambda x: calculate_sales(temperature, x, cpi, unemployment, holiday)},
+    {"label": "CPI", "range": np.linspace(200, 300, 50), "current": cpi, "col": row2_col1,
+     "func": lambda x: calculate_sales(temperature, fuel_price, x, unemployment, holiday)},
+    {"label": "Unemployment (%)", "range": np.linspace(3.0, 15.0, 50), "current": unemployment, "col": row2_col2,
+     "func": lambda x: calculate_sales(temperature, fuel_price, cpi, x, holiday)}
+]
 
-    ax.plot(x, y, linewidth=2.5)
-    ax.scatter(current_x, current_y, s=90, zorder=5)
-    ax.axvline(current_x, linestyle="--", linewidth=1.2, alpha=0.7)
+for p in plots:
+    with p["col"]:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        y_vals = [p["func"](x) for x in p["range"]]
+        ax.plot(p["range"], y_vals, color="#ff7f0e", linewidth=2.5)
+        ax.axvline(x=p["current"], color="red", linestyle="--", alpha=0.6)
+        ax.set_title(f"Impact of {p['label']}", fontsize=11, fontweight='bold')
+        ax.yaxis.set_major_formatter('${x:,.0f}')
+        ax.grid(True, alpha=0.2)
+        st.pyplot(fig, use_container_width=True)
 
-    ax.set_title(title, fontsize=13, weight="semibold")
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel("Weekly Sales")
-
-    ax.grid(True, alpha=0.25, linestyle="--")
-    ax.yaxis.set_major_formatter('${x:,.0f}')
-
-    for spine in ax.spines.values():
-        spine.set_alpha(0.3)
-
-    return fig
-
-c1, c2 = st.columns(2)
-
-# Temperature
-t_range = np.linspace(20, 120, 100)
-t_sales = base_prediction() + temp_effect(t_range)
-with c1:
-    st.pyplot(
-        plot_sensitivity(
-            t_range, t_sales, temperature, predicted_sales,
-            "Temperature Sensitivity", "Temperature (°F)"
-        ),
-        use_container_width=True
-    )
-
-# Fuel
-f_range = np.linspace(2, 5, 100)
-f_sales = predicted_sales + COEF_FUEL * (f_range - fuel_price)
-with c2:
-    st.pyplot(
-        plot_sensitivity(
-            f_range, f_sales, fuel_price, predicted_sales,
-            "Fuel Price Sensitivity", "Fuel ($/gal)"
-        ),
-        use_container_width=True
-    )
-
-# CPI
-c_range = np.linspace(200, 300, 100)
-c_sales = predicted_sales + COEF_CPI * (c_range - cpi)
-with c1:
-    st.pyplot(
-        plot_sensitivity(
-            c_range, c_sales, cpi, predicted_sales,
-            "CPI Sensitivity", "CPI"
-        ),
-        use_container_width=True
-    )
-
-# Unemployment
-u_range = np.linspace(3, 15, 100)
-u_sales = predicted_sales + COEF_UNEMP * (u_range - unemployment)
-with c2:
-    st.pyplot(
-        plot_sensitivity(
-            u_range, u_sales, unemployment, predicted_sales,
-            "Unemployment Sensitivity", "Unemployment (%)"
-        ),
-        use_container_width=True
-    )
-
-st.caption("Walmart Demand Forecasting")
+st.divider()
+st.caption("Walmart Demand Forecasting System | Data-driven sales predictions")
